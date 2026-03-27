@@ -1,0 +1,123 @@
+version: "3.9"
+
+services:
+  # Infrastructure
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    volumes:
+      - redis_data:/data
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: ensemble_user
+      POSTGRES_PASSWORD: ensemble_pass
+      POSTGRES_DB: ensemble_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ensemble_user"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  milvus:
+    image: milvusdb/milvus:2.3.0-cpu-docker
+    ports:
+      - "19530:19530"
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+
+  # Model Services
+  model_service_1:
+    build: ./model_service_1
+    ports:
+      - "8002:8002"
+    environment:
+      MODEL_NAME: distilbert-base-uncased-finetuned-sst-2-english
+      DEVICE: cpu
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  model_service_2:
+    build: ./model_service_2
+    ports:
+      - "8003:8003"
+    environment:
+      MODEL_NAME: gpt2-medium
+      DEVICE: cpu
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  # Application Services
+  orchestrator:
+    build: ./orchestrator
+    ports:
+      - "8001:8001"
+    environment:
+      MODEL_1_URL: http://model_service_1:8002/predict
+      MODEL_2_URL: http://model_service_2:8003/predict
+      REDIS_URL: redis://redis:6379
+      POSTGRES_URL: postgresql://ensemble_user:ensemble_pass@postgres:5432/ensemble_db
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      model_service_1:
+        condition: service_healthy
+      model_service_2:
+        condition: service_healthy
+
+  api:
+    build: ./api
+    ports:
+      - "8000:8000"
+    environment:
+      ORCH_URL: http://orchestrator:8001
+    depends_on:
+      - orchestrator
+
+  # Monitoring
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana:/etc/grafana/provisioning
+    depends_on:
+      - prometheus
+
+volumes:
+  redis_data:
+  postgres_data:
+  grafana_data:
