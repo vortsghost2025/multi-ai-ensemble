@@ -1,0 +1,25 @@
+{
+  "_README": "FILE LOCK REGISTRY. 'owner' = zone assignment (not an active lock). 'since' empty = no active task lock.",
+  "_updated": "2024-10-01T12:00:00Z",
+  "_updatedBy": "human",
+  "locks": {
+    "src/agents/":        { "owner": "dev-kimi",   "since": "", "task": "" },
+    "src/websocket/":    { "owner": "dev-kimi",   "since": "", "task": "" },
+    "src/dashboard/":    { "owner": "dev-kimi",   "since": "", "task": "" },
+
+    "src/memory/":       { "owner": "dev-lingma", "since": "", "task": "" },
+    "src/pipeline/":     { "owner": "dev-lingma", "since": "", "task": "" },
+    "src/healing/":      { "owner": "dev-lingma", "since": "", "task": "" },
+
+    "infra/":            { "owner": "dev-copilot","since": "", "task": "" },
+    "tests/":            { "owner": "dev-copilot","since": "", "task": "" },
+    "benchmarks/":       { "owner": "dev-copilot","since": "", "task": "" },
+
+    "src/orchestrator/": { "owner": "dev-kilo",   "since": "", "task": "" },
+    "src/swarm/":        { "owner": "dev-kilo",   "since": "", "task": "" },
+
+    "shared/types.js":      { "owner": "SHARED", "since": "", "task": "interface contract - coordinate before editing" },
+    "shared/constants.js":  { "owner": "SHARED", "since": "", "task": "interface contract - coordinate before editing" },
+    "package.json":         { "owner": "SHARED", "since": "", "task": "coordinate before editing" }
+  }
+}
