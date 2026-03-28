@@ -1,0 +1,52 @@
+version: "3.8"
+
+services:
+  api:
+    build: ./api
+    ports:
+      - "8000:8000"
+    environment:
+      - ORCH_URL=http://orchestrator:8001
+    depends_on:
+      - orchestrator
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  orchestrator:
+    build: ./orchestrator
+    ports:
+      - "8001:8001"
+    environment:
+      - MODEL_1_URL=http://model1:8002
+      - MODEL_2_URL=http://model2:8003
+    depends_on:
+      - model1
+      - model2
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  model1:
+    build: ./model_service_1
+    ports:
+      - "8002:8002"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  model2:
+    build: ./model_service_2
+    ports:
+      - "8003:8003"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

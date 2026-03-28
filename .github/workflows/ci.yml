@@ -1,0 +1,121 @@
+name: CI/CD to Azure
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Setup ACR
+        run: |
+          ACR_NAME=$(az acr list -g rg-ensemble --query "[0].name" -o tsv)
+          echo "ACR_NAME=$ACR_NAME" >> $GITHUB_ENV
+          az acr login -n $ACR_NAME
+
+      - name: Build and Push API
+        run: |
+          az acr build -r $ACR_NAME -t api:latest -f api/Dockerfile api
+
+      - name: Build and Push Orchestrator
+        run: |
+          az acr build -r $ACR_NAME -t orchestrator:latest -f orchestrator/Dockerfile orchestrator
+
+      - name: Build and Push Model 1
+        run: |
+          az acr build -r $ACR_NAME -t model1:latest -f model_service_1/Dockerfile model_service_1
+
+      - name: Build and Push Model 2
+        run: |
+          az acr build -r $ACR_NAME -t model2:latest -f model_service_2/Dockerfile model_service_2
+
+      - name: Deploy to Container Apps
+        run: |
+          ACR_LOGIN=$(az acr show -g rg-ensemble -n $ACR_NAME --query loginServer -o tsv)
+          ACR_PASS=$(az acr credential show -n $ACR_NAME --query "passwords[0].value" -o tsv)
+
+          # Deploy API
+          az containerapp create \
+            --name api \
+            --resource-group rg-ensemble \
+            --environment env-ensemble \
+            --image $ACR_LOGIN/api:latest \
+            --target-port 8000 \
+            --ingress external \
+            --min-replicas 1 \
+            --cpu 0.5 --memory 1Gi \
+            --registry-server $ACR_LOGIN \
+            --registry-username $ACR_NAME \
+            --registry-password $ACR_PASS 2>/dev/null || \
+          az containerapp update \
+            --name api \
+            --resource-group rg-ensemble \
+            --image $ACR_LOGIN/api:latest
+
+          # Deploy Orchestrator
+          az containerapp create \
+            --name orchestrator \
+            --resource-group rg-ensemble \
+            --environment env-ensemble \
+            --image $ACR_LOGIN/orchestrator:latest \
+            --target-port 8001 \
+            --ingress internal \
+            --min-replicas 1 \
+            --cpu 0.5 --memory 1Gi \
+            --registry-server $ACR_LOGIN \
+            --registry-username $ACR_NAME \
+            --registry-password $ACR_PASS 2>/dev/null || \
+          az containerapp update \
+            --name orchestrator \
+            --resource-group rg-ensemble \
+            --image $ACR_LOGIN/orchestrator:latest
+
+          # Deploy Model 1
+          az containerapp create \
+            --name model1 \
+            --resource-group rg-ensemble \
+            --environment env-ensemble \
+            --image $ACR_LOGIN/model1:latest \
+            --target-port 8002 \
+            --ingress internal \
+            --min-replicas 1 \
+            --cpu 1.0 --memory 2Gi \
+            --registry-server $ACR_LOGIN \
+            --registry-username $ACR_NAME \
+            --registry-password $ACR_PASS 2>/dev/null || \
+          az containerapp update \
+            --name model1 \
+            --resource-group rg-ensemble \
+            --image $ACR_LOGIN/model1:latest
+
+          # Deploy Model 2
+          az containerapp create \
+            --name model2 \
+            --resource-group rg-ensemble \
+            --environment env-ensemble \
+            --image $ACR_LOGIN/model2:latest \
+            --target-port 8003 \
+            --ingress internal \
+            --min-replicas 0 \
+            --cpu 2.0 --memory 4Gi \
+            --registry-server $ACR_LOGIN \
+            --registry-username $ACR_NAME \
+            --registry-password $ACR_PASS 2>/dev/null || \
+          az containerapp update \
+            --name model2 \
+            --resource-group rg-ensemble \
+            --image $ACR_LOGIN/model2:latest
+
+      - name: Get API URL
+        run: |
+          API_URL=$(az containerapp show -g rg-ensemble -n api --query "properties.configuration.ingress.fqdn" -o tsv)
+          echo "Your API URL: https://$API_URL"
+          echo "API_URL=https://$API_URL" >> $GITHUB_OUTPUT
