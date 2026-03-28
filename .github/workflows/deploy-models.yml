@@ -1,0 +1,98 @@
+name: Build and Deploy Models
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-models:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Login to ACR
+        run: az acr login -n ensembleacr
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push model1
+        uses: docker/build-push-action@v5
+        with:
+          context: ./model_service_1
+          file: ./model_service_1/Dockerfile.simple
+          push: true
+          tags: ensembleacr.azurecr.io/model1:latest
+
+      - name: Build and push model2
+        uses: docker/build-push-action@v5
+        with:
+          context: ./model_service_2
+          file: ./model_service_2/Dockerfile
+          push: true
+          tags: ensembleacr.azurecr.io/model2:latest
+
+      - name: Deploy model1 to Container Apps
+        run: |
+          az containerapp create \
+            --name model1 \
+            --resource-group rg-ensemble \
+            --environment env-ensemble \
+            --image ensembleacr.azurecr.io/model1:latest \
+            --target-port 8002 \
+            --ingress internal \
+            --min-replicas 1 \
+            --cpu 1.0 \
+            --memory 2Gi \
+            --env-vars MODEL_NAME=distilbert-base-uncased-finetuned-sst-2-english DEVICE=cpu \
+            --registry-server ensembleacr.azurecr.io \
+            --registry-username ensembleacr \
+            --registry-password $(az acr credential show -n ensembleacr --query "passwords[0].value" -o tsv) \
+            2>/dev/null || echo "Model1 already exists or error"
+
+      - name: Deploy model2 to Container Apps
+        run: |
+          az containerapp create \
+            --name model2 \
+            --resource-group rg-ensemble \
+            --environment env-ensemble \
+            --image ensembleacr.azurecr.io/model2:latest \
+            --target-port 8003 \
+            --ingress internal \
+            --min-replicas 0 \
+            --cpu 2.0 \
+            --memory 4Gi \
+            --env-vars MODEL_NAME=gpt2-medium DEVICE=cpu \
+            --registry-server ensembleacr.azurecr.io \
+            --registry-username ensembleacr \
+            --registry-password $(az acr credential show -n ensembleacr --query "passwords[0].value" -o tsv) \
+            2>/dev/null || echo "Model2 already exists or error"
+
+      - name: Get model URLs
+        run: |
+          MODEL1_URL=$(az containerapp show -g rg-ensemble -n model1 --query "properties.configuration.ingress.fqdn" -o tsv)
+          MODEL2_URL=$(az containerapp show -g rg-ensemble -n model2 --query "properties.configuration.ingress.fqdn" -o tsv)
+          echo "MODEL1_URL=https://$MODEL1_URL"
+          echo "MODEL2_URL=https://$MODEL2_URL"
+
+      - name: Update orchestrator env vars
+        run: |
+          MODEL1_URL=$(az containerapp show -g rg-ensemble -n model1 --query "properties.configuration.ingress.fqdn" -o tsv)
+          MODEL2_URL=$(az containerapp show -g rg-ensemble -n model2 --query "properties.configuration.ingress.fqdn" -o tsv)
+          az containerapp update \
+            --name orchestrator \
+            --resource-group rg-ensemble \
+            --set-env-vars MODEL_1_URL=https://$MODEL1_URL/predict MODEL_2_URL=https://$MODEL2_URL/predict
+
+      - name: Test deployment
+        run: |
+          API_URL=$(az containerapp show -g rg-ensemble -n api --query "properties.configuration.ingress.fqdn" -o tsv)
+          curl -s https://$API_URL/health
+          echo ""
+          curl -s -X POST https://$API_URL/predict \
+            -H "Content-Type: application/json" \
+            -d '{"text": "This is amazing!"}'
